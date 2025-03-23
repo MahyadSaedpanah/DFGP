@@ -7,8 +7,8 @@ from pathlib import Path
 
 
 ########################################################################################################################
-mnist_dir = Path(r"E:\CL-OGP\data")
-pmnist_dir = Path(r"E:\CL-OGP\data\binary_pmnist")
+mnist_dir = Path(r"E:\DFGP\data")
+pmnist_dir = Path(r"E:\DFGP\data\binary_pmnist")
 
 def get(seed=0, fixed_order=False, pc_valid=0.1):
     data = {}

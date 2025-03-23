@@ -17,20 +17,37 @@ from torch.autograd import Variable
 class MLPNet(nn.Module):
     def __init__(self, n_hidden=100, n_outputs=10):
         super(MLPNet, self).__init__()
-        self.act=OrderedDict()
-        self.lin1 = nn.Linear(784,n_hidden,bias=False)
-        self.lin2 = nn.Linear(n_hidden,n_hidden, bias=False)
-        self.fc1  = nn.Linear(n_hidden, n_outputs, bias=False)
+        self.act = OrderedDict()
+        self.lin1 = nn.Linear(784, n_hidden, bias=False)
+        self.lin2 = nn.Linear(n_hidden, n_hidden, bias=False)
+        self.fc1 = nn.Linear(n_hidden, n_outputs, bias=False)
+        
+        # برای محاسبات هسین
+        self.current_loss = None
+
     def forward(self, x):
-        self.act['Lin1']=x
+        self.act['Lin1'] = x
         x = self.lin1(x)
         x = F.relu(x)
-        self.act['Lin2']=x
+        self.act['Lin2'] = x
         x = self.lin2(x)
         x = F.relu(x)
-        self.act['fc1']=x
+        self.act['fc1'] = x
         x = self.fc1(x)
         return x
+
+    def get_loss(self):
+        """
+        برای محاسبات هسین در SAM optimizer
+        """
+        return self.current_loss
+
+    def set_loss(self, loss):
+        """
+        ذخیره loss برای محاسبات هسین
+        """
+        self.current_loss = loss
+
 def get_model(model):
     return deepcopy(model.state_dict())
 

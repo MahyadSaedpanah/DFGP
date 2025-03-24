@@ -17,37 +17,20 @@ from torch.autograd import Variable
 class MLPNet(nn.Module):
     def __init__(self, n_hidden=100, n_outputs=10):
         super(MLPNet, self).__init__()
-        self.act = OrderedDict()
-        self.lin1 = nn.Linear(784, n_hidden, bias=False)
-        self.lin2 = nn.Linear(n_hidden, n_hidden, bias=False)
-        self.fc1 = nn.Linear(n_hidden, n_outputs, bias=False)
-        
-        # برای محاسبات هسین
-        self.current_loss = None
-
+        self.act=OrderedDict()
+        self.lin1 = nn.Linear(784,n_hidden,bias=False)
+        self.lin2 = nn.Linear(n_hidden,n_hidden, bias=False)
+        self.fc1  = nn.Linear(n_hidden, n_outputs, bias=False)
     def forward(self, x):
-        self.act['Lin1'] = x
+        self.act['Lin1']=x
         x = self.lin1(x)
         x = F.relu(x)
-        self.act['Lin2'] = x
+        self.act['Lin2']=x
         x = self.lin2(x)
         x = F.relu(x)
-        self.act['fc1'] = x
+        self.act['fc1']=x
         x = self.fc1(x)
         return x
-
-    def get_loss(self):
-        """
-        برای محاسبات هسین در SAM optimizer
-        """
-        return self.current_loss
-
-    def set_loss(self, loss):
-        """
-        ذخیره loss برای محاسبات هسین
-        """
-        self.current_loss = loss
-
 def get_model(model):
     return deepcopy(model.state_dict())
 
@@ -77,121 +60,111 @@ class AugModule(nn.Module):
         y_a, y_b = y, y[index]
         return x_mix, y_a, y_b
 
-def train(args, model, device, x, y, optimizer, criterion, inner_steps=2):
+def train (args, model, device, x, y, optimizer, criterion, inner_steps=2):
     model.train()
-    r = np.arange(x.size(0))
+    r=np.arange(x.size(0))
     np.random.shuffle(r)
-    r = torch.LongTensor(r).to(device)
+    r=torch.LongTensor(r).to(device)
     aug_model = AugModule()
 
     # Loop batches
-    for i in range(0, len(r), args.batch_size_train):
-        if i + args.batch_size_train <= len(r):
-            b = r[i:i + args.batch_size_train]
-        else:
-            b = r[i:]
-        data = x[b].view(-1, 28 * 28)
+    for i in range(0,len(r),args.batch_size_train):
+        if i+args.batch_size_train<=len(r): b=r[i:i+args.batch_size_train]
+        else: b=r[i:]
+        data = x[b].view(-1, 28*28)
         raw_data, raw_target = data.to(device), y[b].to(device)
 
         # Data Perturbation Step
+        # initialize lamb mix:
         N = data.shape[0]
         lam = (beta_distributions(size=N, alpha=args.mixup_alpha)).astype(np.float32)
         lam_adv = Variable(torch.from_numpy(lam)).to(device)
-        lam_adv = torch.clamp(lam_adv, 0, 1)
+        lam_adv = torch.clamp(lam_adv, 0, 1)  # clamp to range [0,1)
         lam_adv.requires_grad = True
 
+        # index = torch.randperm(N).cuda()
         index = torch.randperm(N).to(device)
+        # initialize x_mix
         mix_inputs, mix_targets_a, mix_targets_b = aug_model(raw_data, lam_adv, raw_target, index)
 
-        # Weight and Data Ascent Step با استفاده از تقریب هسین
+        # Weight and Data Ascent Step
         output1 = model(raw_data)
         output2 = model(mix_inputs)
-        loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(
-            criterion, output2, mix_targets_a, mix_targets_b, lam_adv.detach())
-        
-        optimizer.zero_grad()
+        loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(criterion, output2, mix_targets_a, mix_targets_b, lam_adv.detach())
         loss.backward()
-        
-        # اعمال گرادیان اصلاح شده با هسین (معادله 11)
+        grad_lam_adv = lam_adv.grad.data
+        grad_norm = torch.norm(grad_lam_adv, p=2) + 1.e-16
+        lam_adv.data.add_(grad_lam_adv * 0.05 / grad_norm)  # gradient assend by SAM
+        lam_adv = torch.clamp(lam_adv, 0, 1)
         optimizer.perturb_step()
 
         # Weight Descent Step
         mix_inputs, mix_targets_a, mix_targets_b = aug_model(raw_data, lam_adv, raw_target, index)
         mix_inputs = mix_inputs.detach()
+
         lam_adv = lam_adv.detach()
-        
         output1 = model(raw_data)
         output2 = model(mix_inputs)
-        loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(
-            criterion, output2, mix_targets_a, mix_targets_b, lam_adv)
-        
-        optimizer.zero_grad()
+        loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(criterion, output2, mix_targets_a, mix_targets_b, lam_adv.detach())
         loss.backward()
         optimizer.unperturb_step()
+
         optimizer.step()
 
-def train_projected(args, model, device, x, y, optimizer, criterion, feature_mat, inner_steps=2):
+def train_projected (args, model,device,x,y,optimizer,criterion,feature_mat, inner_steps=2):
     model.train()
-    r = np.arange(x.size(0))
+    r=np.arange(x.size(0))
     np.random.shuffle(r)
-    r = torch.LongTensor(r).to(device)
+    r=torch.LongTensor(r).to(device)
     aug_model = AugModule()
 
     # Loop batches
-    for i in range(0, len(r), args.batch_size_train):
-        if i + args.batch_size_train <= len(r):
-            b = r[i:i + args.batch_size_train]
-        else:
-            b = r[i:]
-        data = x[b].view(-1, 28 * 28)
+    for i in range(0,len(r),args.batch_size_train):
+        if i+args.batch_size_train<=len(r): b=r[i:i+args.batch_size_train]
+        else: b=r[i:]
+        data = x[b].view(-1, 28*28)
         raw_data, raw_target = data.to(device), y[b].to(device)
 
         # Data Perturbation Step
+        # initialize lamb mix:
         N = data.shape[0]
         lam = (beta_distributions(size=N, alpha=args.mixup_alpha)).astype(np.float32)
         lam_adv = Variable(torch.from_numpy(lam)).to(device)
-        lam_adv = torch.clamp(lam_adv, 0, 1)
+        lam_adv = torch.clamp(lam_adv, 0, 1)  # clamp to range [0,1)
         lam_adv.requires_grad = True
 
+        # index = torch.randperm(N).cuda()
         index = torch.randperm(N).to(device)
+        # initialize x_mix
         mix_inputs, mix_targets_a, mix_targets_b = aug_model(raw_data, lam_adv, raw_target, index)
 
-        # Weight and Data Ascent Step با استفاده از تقریب هسین
+        # Weight and Data Ascent Step
         output1 = model(raw_data)
         output2 = model(mix_inputs)
-        loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(
-            criterion, output2, mix_targets_a, mix_targets_b, lam_adv.detach())
-        
-        optimizer.zero_grad()
+        loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(criterion, output2, mix_targets_a,
+                                                                                    mix_targets_b, lam_adv.detach())
         loss.backward()
-        
-        # اعمال گرادیان اصلاح شده با هسین (معادله 11)
+        grad_lam_adv = lam_adv.grad.data
+        grad_norm = torch.norm(grad_lam_adv, p=2) + 1.e-16
+        lam_adv.data.add_(grad_lam_adv * 0.05 / grad_norm)  # gradient assend by SAM
+        lam_adv = torch.clamp(lam_adv, 0, 1)
         optimizer.perturb_step()
 
         # Weight Descent Step
         mix_inputs, mix_targets_a, mix_targets_b = aug_model(raw_data, lam_adv, raw_target, index)
         mix_inputs = mix_inputs.detach()
         lam_adv = lam_adv.detach()
-        
         output1 = model(raw_data)
         output2 = model(mix_inputs)
-        loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(
-            criterion, output2, mix_targets_a, mix_targets_b, lam_adv)
-        
-        optimizer.zero_grad()
+        loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(criterion, output2, mix_targets_a,
+                                                                                    mix_targets_b, lam_adv.detach())
         loss.backward()
         optimizer.unperturb_step()
 
-        # Gradient Projections با در نظر گرفتن تقریب هسین
-        for k, (m, params) in enumerate(model.named_parameters()):
+        # Gradient Projections
+        for k, (m,params) in enumerate(model.named_parameters()):
             sz = params.grad.data.size(0)
-            # اعمال پروجکشن بر روی گرادیان‌های اصلاح شده
-            projected_grad = params.grad.data - torch.mm(
-                params.grad.data.view(sz, -1), 
-                feature_mat[k]
-            ).view(params.size())
-            params.grad.data = projected_grad
-
+            params.grad.data = params.grad.data - torch.mm(params.grad.data.view(sz,-1), feature_mat[k]).view(params.size())
         optimizer.step()
 
 def test (args, model, device, x, y, criterion):

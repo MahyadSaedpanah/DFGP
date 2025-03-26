@@ -60,18 +60,20 @@ class AugModule(nn.Module):
         y_a, y_b = y, y[index]
         return x_mix, y_a, y_b
 
-def train (args, model, device, x, y, optimizer, criterion, inner_steps=2):
+def train(args, model, device, x, y, optimizer, criterion, inner_steps=2):
     model.train()
-    r=np.arange(x.size(0))
+    r = np.arange(x.size(0))
     np.random.shuffle(r)
-    r=torch.LongTensor(r).to(device)
+    r = torch.LongTensor(r).to(device)
     aug_model = AugModule()
 
     # Loop batches
-    for i in range(0,len(r),args.batch_size_train):
-        if i+args.batch_size_train<=len(r): b=r[i:i+args.batch_size_train]
-        else: b=r[i:]
-        data = x[b].view(-1, 28*28)
+    for i in range(0, len(r), args.batch_size_train):
+        if i + args.batch_size_train <= len(r):
+            b = r[i:i + args.batch_size_train]
+        else:
+            b = r[i:]
+        data = x[b].view(-1, 28 * 28)
         raw_data, raw_target = data.to(device), y[b].to(device)
 
         # Data Perturbation Step
@@ -79,10 +81,9 @@ def train (args, model, device, x, y, optimizer, criterion, inner_steps=2):
         N = data.shape[0]
         lam = (beta_distributions(size=N, alpha=args.mixup_alpha)).astype(np.float32)
         lam_adv = Variable(torch.from_numpy(lam)).to(device)
-        lam_adv = torch.clamp(lam_adv, 0, 1)  # clamp to range [0,1)
+        lam_adv = torch.clamp(lam_adv, 0, 1)  
         lam_adv.requires_grad = True
 
-        # index = torch.randperm(N).cuda()
         index = torch.randperm(N).to(device)
         # initialize x_mix
         mix_inputs, mix_targets_a, mix_targets_b = aug_model(raw_data, lam_adv, raw_target, index)
@@ -92,24 +93,33 @@ def train (args, model, device, x, y, optimizer, criterion, inner_steps=2):
         output2 = model(mix_inputs)
         loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(criterion, output2, mix_targets_a, mix_targets_b, lam_adv.detach())
         loss.backward()
+
         grad_lam_adv = lam_adv.grad.data
         grad_norm = torch.norm(grad_lam_adv, p=2) + 1.e-16
         lam_adv.data.add_(grad_lam_adv * 0.05 / grad_norm)  # gradient assend by SAM
         lam_adv = torch.clamp(lam_adv, 0, 1)
+
         optimizer.perturb_step()
 
         # Weight Descent Step
         mix_inputs, mix_targets_a, mix_targets_b = aug_model(raw_data, lam_adv, raw_target, index)
         mix_inputs = mix_inputs.detach()
-
         lam_adv = lam_adv.detach()
+        
         output1 = model(raw_data)
         output2 = model(mix_inputs)
         loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(criterion, output2, mix_targets_a, mix_targets_b, lam_adv.detach())
         loss.backward()
-        optimizer.unperturb_step()
 
+        optimizer.unperturb_step()
         optimizer.step()
+
+        # بررسی مقدار lam_adv بعد از اصلاحات SAM
+        if torch.any(lam_adv < 0) or torch.any(lam_adv > 1):
+            print("⚠️ Warning: lam_adv خارج از محدوده [0,1] قرار گرفته است!")
+
+    return
+
 
 def train_projected (args, model,device,x,y,optimizer,criterion,feature_mat, inner_steps=2):
     model.train()

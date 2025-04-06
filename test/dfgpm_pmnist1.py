@@ -10,7 +10,7 @@ import argparse
 from copy import deepcopy
 import time
 
-from flatness_minima import SAM
+from test.flatness_minima1 import SAM
 from torch.autograd import Variable
 
 ## Define MLP model
@@ -60,20 +60,18 @@ class AugModule(nn.Module):
         y_a, y_b = y, y[index]
         return x_mix, y_a, y_b
 
-def train_dfgp(args, model, device, x, y, optimizer, criterion, inner_steps=2):
+def train (args, model, device, x, y, optimizer, criterion, inner_steps=2):
     model.train()
-    r = np.arange(x.size(0))
+    r=np.arange(x.size(0))
     np.random.shuffle(r)
-    r = torch.LongTensor(r).to(device)
+    r=torch.LongTensor(r).to(device)
     aug_model = AugModule()
 
     # Loop batches
-    for i in range(0, len(r), args.batch_size_train):
-        if i + args.batch_size_train <= len(r):
-            b = r[i:i + args.batch_size_train]
-        else:
-            b = r[i:]
-        data = x[b].view(-1, 28 * 28)
+    for i in range(0,len(r),args.batch_size_train):
+        if i+args.batch_size_train<=len(r): b=r[i:i+args.batch_size_train]
+        else: b=r[i:]
+        data = x[b].view(-1, 28*28)
         raw_data, raw_target = data.to(device), y[b].to(device)
 
         # Data Perturbation Step
@@ -84,54 +82,48 @@ def train_dfgp(args, model, device, x, y, optimizer, criterion, inner_steps=2):
         lam_adv = torch.clamp(lam_adv, 0, 1)  # clamp to range [0,1)
         lam_adv.requires_grad = True
 
+        # index = torch.randperm(N).cuda()
         index = torch.randperm(N).to(device)
         # initialize x_mix
         mix_inputs, mix_targets_a, mix_targets_b = aug_model(raw_data, lam_adv, raw_target, index)
 
-        # Data Ascent Step (optimize lam_adv)
-        optimizer.zero_grad()
+        # Weight and Data Ascent Step
         output1 = model(raw_data)
         output2 = model(mix_inputs)
         loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(criterion, output2, mix_targets_a, mix_targets_b, lam_adv.detach())
         loss.backward()
+        optimizer.compute_modified_gradient(lambda_param=args.mixup_weight)
         grad_lam_adv = lam_adv.grad.data
         grad_norm = torch.norm(grad_lam_adv, p=2) + 1.e-16
-        lam_adv.data.add_(grad_lam_adv * 0.05 / grad_norm)  # gradient ascend by SAM
+        lam_adv.data.add_(grad_lam_adv * 0.05 / grad_norm)  # gradient assend by SAM
         lam_adv = torch.clamp(lam_adv, 0, 1)
+        optimizer.perturb_step()
 
-        # Calculate final perturbed mixup inputs with optimized lambda
+        # Weight Descent Step
         mix_inputs, mix_targets_a, mix_targets_b = aug_model(raw_data, lam_adv, raw_target, index)
         mix_inputs = mix_inputs.detach()
+
         lam_adv = lam_adv.detach()
+        output1 = model(raw_data)
+        output2 = model(mix_inputs)
+        loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(criterion, output2, mix_targets_a, mix_targets_b, lam_adv.detach())
+        loss.backward()
+        optimizer.unperturb_step()
 
-        # Compute Flatness-aware Gradient with Hessian approximation
-        optimizer.compute_flatness_aware_gradient(
-            original_inputs=raw_data,
-            original_targets=raw_target,
-            perturbed_inputs=mix_inputs,
-            perturbed_targets=(mix_targets_a, mix_targets_b, lam_adv),
-            loss_fn=criterion,
-            mixup_criterion=mixup_criterion
-        )
-
-        # Weight update step
         optimizer.step()
 
-
-def train_dfgp_projected(args, model, device, x, y, optimizer, criterion, feature_mat, inner_steps=2):
+def train_projected (args, model,device,x,y,optimizer,criterion,feature_mat, inner_steps=2):
     model.train()
-    r = np.arange(x.size(0))
+    r=np.arange(x.size(0))
     np.random.shuffle(r)
-    r = torch.LongTensor(r).to(device)
+    r=torch.LongTensor(r).to(device)
     aug_model = AugModule()
 
     # Loop batches
-    for i in range(0, len(r), args.batch_size_train):
-        if i + args.batch_size_train <= len(r):
-            b = r[i:i + args.batch_size_train]
-        else:
-            b = r[i:]
-        data = x[b].view(-1, 28 * 28)
+    for i in range(0,len(r),args.batch_size_train):
+        if i+args.batch_size_train<=len(r): b=r[i:i+args.batch_size_train]
+        else: b=r[i:]
+        data = x[b].view(-1, 28*28)
         raw_data, raw_target = data.to(device), y[b].to(device)
 
         # Data Perturbation Step
@@ -142,43 +134,39 @@ def train_dfgp_projected(args, model, device, x, y, optimizer, criterion, featur
         lam_adv = torch.clamp(lam_adv, 0, 1)  # clamp to range [0,1)
         lam_adv.requires_grad = True
 
+        # index = torch.randperm(N).cuda()
         index = torch.randperm(N).to(device)
         # initialize x_mix
         mix_inputs, mix_targets_a, mix_targets_b = aug_model(raw_data, lam_adv, raw_target, index)
 
-        # Data Ascent Step (optimize lam_adv)
-        optimizer.zero_grad()
+        # Weight and Data Ascent Step
         output1 = model(raw_data)
         output2 = model(mix_inputs)
-        loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(criterion, output2, mix_targets_a, mix_targets_b, lam_adv.detach())
+        loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(criterion, output2, mix_targets_a,
+                                                                                    mix_targets_b, lam_adv.detach())
         loss.backward()
+        optimizer.compute_modified_gradient(lambda_param=args.mixup_weight)
         grad_lam_adv = lam_adv.grad.data
         grad_norm = torch.norm(grad_lam_adv, p=2) + 1.e-16
-        lam_adv.data.add_(grad_lam_adv * 0.05 / grad_norm)  # gradient ascend by SAM
+        lam_adv.data.add_(grad_lam_adv * 0.05 / grad_norm)  # gradient assend by SAM
         lam_adv = torch.clamp(lam_adv, 0, 1)
+        optimizer.perturb_step()
 
-        # Calculate final perturbed mixup inputs with optimized lambda
+        # Weight Descent Step
         mix_inputs, mix_targets_a, mix_targets_b = aug_model(raw_data, lam_adv, raw_target, index)
         mix_inputs = mix_inputs.detach()
         lam_adv = lam_adv.detach()
+        output1 = model(raw_data)
+        output2 = model(mix_inputs)
+        loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(criterion, output2, mix_targets_a,
+                                                                                    mix_targets_b, lam_adv.detach())
+        loss.backward()
+        optimizer.unperturb_step()
 
-        # Compute Flatness-aware Gradient with Hessian approximation
-        optimizer.compute_flatness_aware_gradient(
-            original_inputs=raw_data,
-            original_targets=raw_target,
-            perturbed_inputs=mix_inputs,
-            perturbed_targets=(mix_targets_a, mix_targets_b, lam_adv),
-            loss_fn=criterion,
-            mixup_criterion=mixup_criterion
-        )
-
-        # Gradient Projections for continual learning
-        for k, (m, params) in enumerate(model.named_parameters()):
-            if params.grad is not None:
-                sz = params.grad.data.size(0)
-                params.grad.data = params.grad.data - torch.mm(params.grad.data.view(sz, -1), feature_mat[k]).view(params.size())
-
-        # Weight update step
+        # Gradient Projections
+        for k, (m,params) in enumerate(model.named_parameters()):
+            sz = params.grad.data.size(0)
+            params.grad.data = params.grad.data - torch.mm(params.grad.data.view(sz,-1), feature_mat[k]).view(params.size())
         optimizer.step()
 
 def test (args, model, device, x, y, criterion):
@@ -329,12 +317,13 @@ def main(args):
 
             feature_list =[]
             base_optimizer = optim.SGD(model.parameters(), lr=lr)
-            optimizer = DFGP(base_optimizer, model, rho=0.05, eta=0.01, epsilon_prime=args.epsilon_prime, lambda_val=args.mixup_weight)
+            optimizer = SAM(base_optimizer, model)
+            optimizer = SAM(base_optimizer, model, epsilon=args.epsilon)
 
             for epoch in range(1, args.n_epochs+1):
                 # Train
                 clock0=time.time()
-                train_dfgp(args, model, device, xtrain, ytrain, optimizer, criterion)
+                train(args, model, device, xtrain, ytrain, optimizer, criterion)
                 clock1=time.time()
                 tr_loss,tr_acc = test(args, model, device, xtrain, ytrain,  criterion)
                 log.info('Epoch {:3d} | Train: loss={:.3f}, acc={:5.1f}% | time={:5.1f}ms |'.format(epoch, tr_loss,tr_acc, 1000*(clock1-clock0)))
@@ -352,7 +341,8 @@ def main(args):
 
         else:
             base_optimizer = optim.SGD(model.parameters(), lr=lr)
-            optimizer = DFGP(base_optimizer, model, rho=0.05, eta=0.01, epsilon_prime=args.epsilon_prime, lambda_val=args.mixup_weight)
+            optimizer = SAM(base_optimizer, model)
+            optimizer = SAM(base_optimizer, model, epsilon=args.epsilon)
 
             feature_mat = []
             # Projection Matrix Precomputation
@@ -364,7 +354,7 @@ def main(args):
             for epoch in range(1, args.n_epochs+1):
                 # Train
                 clock0=time.time()
-                train_dfgp_projected(args, model, device, xtrain, ytrain, optimizer, criterion, feature_mat)
+                train_projected(args, model,device,xtrain, ytrain,optimizer,criterion,feature_mat)
                 clock1=time.time()
                 tr_loss, tr_acc = test(args, model, device, xtrain, ytrain,  criterion)
                 log.info('Epoch {:3d} | Train: loss={:.3f}, acc={:5.1f}% | time={:5.1f}ms |'.format(epoch, tr_loss, tr_acc, 1000*(clock1-clock0)))
@@ -405,7 +395,6 @@ def main(args):
     log.info('[Elapsed time = {:.1f} ms]'.format((time.time()-tstart)*1000))
     log.info('-'*50)
     return acc_matrix[-1].mean(), bwt
-
 def create_log_dir(path, filename='log.txt'):
     import logging
     if not os.path.exists(path):
@@ -463,9 +452,8 @@ if __name__ == "__main__":
                         help='mixup_alpha')
     parser.add_argument('--mixup_weight', type=float, default=0.1, metavar='Weight',
                         help='mixup_weight')
-    # Add to your argparse setup
-    parser.add_argument('--epsilon_prime', type=float, default=0.01, metavar='EP',
-                        help='epsilon prime for finite difference Hessian approximation (default: 0.01)')
+    parser.add_argument('--epsilon', type=float, default=1e-3,
+                        help='epsilon for finite difference approximation')
 
     args = parser.parse_args()
     str_time_ = time.strftime('%Y%m%d_%H%M%S', time.localtime(time.time()))

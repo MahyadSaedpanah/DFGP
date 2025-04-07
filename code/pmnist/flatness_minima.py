@@ -124,8 +124,24 @@ class DFGP(SAM):
         # Step 2: Calculate perturbed gradients for Hessian approximation
         self.optimizer.zero_grad()
         
-        # Perturb weights in the direction of the gradient
-        self.perturb_step()
+        # Calculate perturbation vectors without applying them
+        grads = []
+        perturbation_vectors = {}
+        for n, p in self.model.named_parameters():
+            if p.grad is None:
+                continue
+            grads.append(torch.norm(p.grad, p=2))
+        
+        if grads:  # Check if grads is not empty
+            grad_norm = torch.norm(torch.stack(grads), p=2) + 1.e-16
+            
+            for n, p in self.model.named_parameters():
+                if p.grad is None:
+                    continue
+                eps = p.grad.clone()
+                eps.mul_(self.epsilon_prime / grad_norm)  # Use epsilon_prime for finite difference
+                perturbation_vectors[n] = eps
+                p.data.add_(eps)  # Apply perturbation
         
         # Compute loss on original data with perturbed weights
         output1_perturbed = self.model(original_inputs)
@@ -148,14 +164,14 @@ class DFGP(SAM):
         for name, param in self.model.named_parameters():
             if param.grad is not None and name in original_grads:
                 # Hessian-vector product approximation: (∇L(W + ϵ'δ) - ∇L(W)) / ϵ'
-                hessian_term = (param.grad.data - original_grads[name]) / self.epsilon_prime
-                # Update gradient with Hessian approximation: ∇L(W) + ((∇L(W + ϵ'δ) - ∇L(W)) / ϵ')
-                param.grad.data = original_grads[name] + hessian_term
-                
+                if name in perturbation_vectors:
+                    hessian_term = (param.grad.data - original_grads[name]) / self.epsilon_prime
+                    # Update gradient with Hessian approximation: ∇L(W) + ((∇L(W + ϵ'δ) - ∇L(W)) / ϵ')
+                    param.grad.data = original_grads[name] + hessian_term
+                    
         # Restore original parameters
         for name, param in self.model.named_parameters():
-            if name in original_params:
-                param.data.copy_(original_params[name])
-        
-        # Remember the direction for unperturb_step
-        self.perturb_step()
+            if name in perturbation_vectors:
+                param.data.sub_(perturbation_vectors[name])
+            
+        # No need to call perturb_step again at the end - this was causing issues

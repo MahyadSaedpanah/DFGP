@@ -173,5 +173,3 @@ class DFGP(SAM):
         for name, param in self.model.named_parameters():
             if name in perturbation_vectors:
                 param.data.sub_(perturbation_vectors[name])
-            
-        # No need to call perturb_step again at the end - this was causing issues

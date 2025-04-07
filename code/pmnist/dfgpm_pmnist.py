@@ -96,7 +96,6 @@ def train_dfgp(args, model, device, x, y, optimizer, criterion, inner_steps=2):
         loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(criterion, output2, mix_targets_a, mix_targets_b, lam_adv.detach())
         loss.backward()
         
-        # اطمینان از وجود گرادیان
         if lam_adv.grad is not None:
             grad_lam_adv = lam_adv.grad.data
             grad_norm = torch.norm(grad_lam_adv, p=2) + 1.e-16
@@ -109,8 +108,6 @@ def train_dfgp(args, model, device, x, y, optimizer, criterion, inner_steps=2):
         lam_adv = lam_adv.detach()
 
         # Compute Flatness-aware Gradient with Hessian approximation
-        # نیازی به صفر کردن گرادیان قبل از این فراخوانی نیست
-        # تابع compute_flatness_aware_gradient خودش گرادیان‌ها را صفر می‌کند
         optimizer.compute_flatness_aware_gradient(
             original_inputs=raw_data,
             original_targets=raw_target,
@@ -159,7 +156,6 @@ def train_dfgp_projected(args, model, device, x, y, optimizer, criterion, featur
         loss = criterion(output1, raw_target) + args.mixup_weight * mixup_criterion(criterion, output2, mix_targets_a, mix_targets_b, lam_adv.detach())
         loss.backward()
         
-        # اطمینان از وجود گرادیان
         if lam_adv.grad is not None:
             grad_lam_adv = lam_adv.grad.data
             grad_norm = torch.norm(grad_lam_adv, p=2) + 1.e-16

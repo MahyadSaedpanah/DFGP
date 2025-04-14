@@ -144,8 +144,7 @@ def train(args, model, device, x,y, optimizer,criterion, task_id):
         lam_adv = torch.clamp(lam_adv, 0, 1)  # clamp to range [0,1)
         lam_adv.requires_grad = True
 
-        # index = torch.randperm(N).cuda()
-        index = torch.randperm(N).to(device)
+        index = torch.randperm(N).cuda()
         # initialize x_mix
         mix_inputs, mix_targets_a, mix_targets_b = aug_model(raw_data, lam_adv, raw_target, index)
 
@@ -196,8 +195,7 @@ def train_projected(args,model,device,x,y,optimizer,criterion,feature_mat,task_i
         lam_adv = torch.clamp(lam_adv, 0, 1)  # clamp to range [0,1)
         lam_adv.requires_grad = True
 
-        # index = torch.randperm(N).cuda()
-        index = torch.randperm(N).to(device)
+        index = torch.randperm(N).cuda()
         # initialize x_mix
         mix_inputs, mix_targets_a, mix_targets_b = aug_model(raw_data, lam_adv, raw_target, index)
 
@@ -303,8 +301,7 @@ def get_representation_matrix (net, device, x, y=None):
 
 
 def update_GradientMemory (model, mat_list, threshold, feature_list=[],):
-    # log.info ('Threshold: ', threshold)
-    log.info("Threshold: %s", threshold)
+    log.info ('Threshold: ', threshold)
     if not feature_list:
         # After First Task
         for i in range(len(mat_list)):
@@ -390,8 +387,7 @@ def main(args):
             model = AlexNet(taskcla).to(device)
             log.info ('Model parameters ---')
             for k_t, (m, param) in enumerate(model.named_parameters()):
-                # log.info (k_t,m,param.shape)
-                log.info("k_t: %s, m: %s, param.shape: %s", k_t, m, param.shape)
+                log.info (k_t,m,param.shape)
             log.info ('-'*40)
 
             best_model=get_model(model)
@@ -544,7 +540,7 @@ if __name__ == "__main__":
                         help='hold before decaying lr (default: 6)')
     parser.add_argument('--lr_factor', type=int, default=2, metavar='LRF',
                         help='lr decay factor (default: 2)')
-    parser.add_argument('--savename', type=str, default='./logs/CIFAR100/',
+    parser.add_argument('--savename', type=str, default='./logs/DFGPM/',
                         help='save path')
     parser.add_argument('--gpm_thro', type=float, default=0.95, metavar='gradient projection',
                         help='gpm_thro')
